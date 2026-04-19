@@ -132,7 +132,7 @@ export default function Auth() {
   const queryClient = useQueryClient();
 
   // Login form
-  const [loginEmail, setLoginEmail] = useState("");
+  const [loginEmail, setLoginEmail] = useState(() => localStorage.getItem("auth_remember") === "true" ? (localStorage.getItem("auth_saved_email") || "") : "");
   const [loginPassword, setLoginPassword] = useState("");
 
   // Signup multi-step state
@@ -148,6 +148,7 @@ export default function Auth() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
+  const [rememberMe, setRememberMe] = useState(() => localStorage.getItem("auth_remember") === "true");
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showSignupPassword, setShowSignupPassword] = useState(false);
   const [showSignupConfirmPassword, setShowSignupConfirmPassword] = useState(false);
@@ -380,6 +381,13 @@ export default function Auth() {
     setLoginError(null);
     try {
       const result = await login.mutateAsync({ email: loginEmail, password: loginPassword });
+      if (rememberMe) {
+        localStorage.setItem("auth_remember", "true");
+        localStorage.setItem("auth_saved_email", loginEmail);
+      } else {
+        localStorage.removeItem("auth_remember");
+        localStorage.removeItem("auth_saved_email");
+      }
       toast({ title: t.auth.welcomeBackToast });
       if ((result as any)?.role === "admin") setLocation("/admin");
       else if ((result as any)?.role === "employee") setLocation("/admin/pos");
@@ -636,6 +644,20 @@ export default function Auth() {
                       {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  <input
+                    id="remember-me"
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={e => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 accent-foreground cursor-pointer"
+                    data-testid="checkbox-remember-me"
+                  />
+                  <label htmlFor="remember-me" className="text-sm text-muted-foreground cursor-pointer select-none">
+                    {language === "ar" ? "تذكرني" : "Remember me"}
+                  </label>
                 </div>
 
                 <LoginNotification

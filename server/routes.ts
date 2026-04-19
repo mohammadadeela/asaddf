@@ -1140,6 +1140,57 @@ export async function registerRoutes(
     res.json(lowStock);
   });
 
+  // Bulk discount on low-stock products
+  app.patch("/api/admin/products/bulk-discount", async (req, res) => {
+    if (!req.isAuthenticated() || (req.user as any).role !== "admin") {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    try {
+      const { ids, discountPercent } = req.body as { ids: number[]; discountPercent: number };
+      if (!ids || !Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ message: "No product IDs provided" });
+      }
+      if (typeof discountPercent !== "number" || discountPercent <= 0 || discountPercent >= 100) {
+        return res.status(400).json({ message: "Discount percent must be between 1 and 99" });
+      }
+      let updated = 0;
+      for (const id of ids) {
+        const product = await storage.getProduct(id);
+        if (!product) continue;
+        const basePrice = parseFloat(product.price);
+        const discountPrice = (basePrice * (1 - discountPercent / 100)).toFixed(2);
+        await storage.updateProduct(id, { discountPrice } as any);
+        updated++;
+      }
+      res.json({ updated });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Remove discount from products
+  app.patch("/api/admin/products/remove-discount", async (req, res) => {
+    if (!req.isAuthenticated() || (req.user as any).role !== "admin") {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    try {
+      const { ids } = req.body as { ids: number[] };
+      if (!ids || !Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ message: "No product IDs provided" });
+      }
+      let updated = 0;
+      for (const id of ids) {
+        const product = await storage.getProduct(id);
+        if (!product) continue;
+        await storage.updateProduct(id, { discountPrice: null } as any);
+        updated++;
+      }
+      res.json({ updated });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // --- Admin User Management ---
   app.get("/api/admin/users", async (req, res) => {
     if (!req.isAuthenticated() || (req.user as any).role !== "admin") {

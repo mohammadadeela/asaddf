@@ -476,6 +476,13 @@ export default function Products() {
     errors: string[];
   } | null>(null);
 
+  const LOW_STOCK_THRESHOLD = 5;
+  const [showLowStock, setShowLowStock] = useState(false);
+  const [showDiscountDialog, setShowDiscountDialog] = useState(false);
+  const [discountPercent, setDiscountPercent] = useState("");
+  const [discountApplying, setDiscountApplying] = useState(false);
+  const [selectedLowStockIds, setSelectedLowStockIds] = useState<Set<number>>(new Set());
+
   const [isFlagsDialogOpen, setIsFlagsDialogOpen] = useState(false);
   const [flagSelections, setFlagSelections] = useState<{
     isBestSeller: "unchanged" | "on" | "off";
@@ -496,6 +503,67 @@ export default function Products() {
     const saved = getSetting(siteSettings, "new_arrivals_days");
     if (saved) setNewArrivalDays(parseInt(saved) || 14);
   }, [siteSettings]);
+
+  const handleApplyDiscount = async () => {
+    const pct = parseFloat(discountPercent);
+    if (!pct || pct <= 0 || pct >= 100) {
+      toast({ title: language === "ar" ? "نسبة غير صحيحة" : "Invalid percentage", variant: "destructive" });
+      return;
+    }
+    const ids = selectedLowStockIds.size > 0
+      ? Array.from(selectedLowStockIds)
+      : lowStockProducts.map(p => p.id);
+    if (ids.length === 0) return;
+    setDiscountApplying(true);
+    try {
+      const res = await fetch("/api/admin/products/bulk-discount", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, discountPercent: pct }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const { updated } = await res.json();
+      import("@/lib/queryClient").then(({ queryClient }) => {
+        queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      });
+      toast({
+        title: language === "ar"
+          ? `تم تطبيق الخصم على ${updated} منتج`
+          : `Discount applied to ${updated} product(s)`,
+      });
+      setShowDiscountDialog(false);
+      setDiscountPercent("");
+      setSelectedLowStockIds(new Set());
+    } catch {
+      toast({ title: language === "ar" ? "فشل التطبيق" : "Failed to apply discount", variant: "destructive" });
+    } finally {
+      setDiscountApplying(false);
+    }
+  };
+
+  const handleRemoveDiscount = async (ids: number[]) => {
+    if (ids.length === 0) return;
+    try {
+      const res = await fetch("/api/admin/products/remove-discount", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const { updated } = await res.json();
+      import("@/lib/queryClient").then(({ queryClient }) => {
+        queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      });
+      toast({
+        title: language === "ar"
+          ? `تمت إزالة الخصم من ${updated} منتج`
+          : `Discount removed from ${updated} product(s)`,
+      });
+      setSelectedLowStockIds(new Set());
+    } catch {
+      toast({ title: language === "ar" ? "فشل" : "Failed", variant: "destructive" });
+    }
+  };
 
   const handleExpireNewArrivals = async () => {
     setExpireLoading(true);
@@ -526,6 +594,7 @@ export default function Products() {
 
   const filteredProducts = products?.filter((p) => {
     if (categoryFilter !== "" && p.categoryId !== categoryFilter) return false;
+    if (showLowStock && p.stockQuantity >= LOW_STOCK_THRESHOLD) return false;
     if (!search) return true;
     const q = search.toLowerCase().replace(/^#/, "");
     const productNum = String(p.id).padStart(4, "0");
@@ -539,6 +608,8 @@ export default function Products() {
       String(p.id).includes(q)
     );
   });
+
+  const lowStockProducts = filteredProducts?.filter(p => p.stockQuantity < LOW_STOCK_THRESHOLD) ?? [];
 
   const uploadFiles = async (files: FileList | File[]): Promise<string[]> => {
     const fd = new FormData();
@@ -1221,6 +1292,19 @@ export default function Products() {
             ))}
           </select>
           <div className="flex gap-2">
+            <button
+              onClick={() => { setShowLowStock(v => !v); setSelectedLowStockIds(new Set()); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border transition-all rounded ${showLowStock ? "bg-amber-500 text-white border-amber-500 shadow" : "bg-background text-amber-600 border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"}`}
+              data-testid="button-low-stock-filter"
+            >
+              <AlertCircle className="w-3.5 h-3.5" />
+              {language === "ar" ? "مخزون منخفض" : "Low Stock"}
+              {(products?.filter(p => p.stockQuantity < LOW_STOCK_THRESHOLD).length ?? 0) > 0 && (
+                <span className={`rounded-full text-[10px] font-bold px-1.5 py-0.5 ${showLowStock ? "bg-white text-amber-600" : "bg-amber-500 text-white"}`}>
+                  {products?.filter(p => p.stockQuantity < LOW_STOCK_THRESHOLD).length}
+                </span>
+              )}
+            </button>
             <div className="border border-border rounded flex">
               <button
                 onClick={() => setViewMode("table")}
@@ -1388,6 +1472,194 @@ export default function Products() {
           </div>
         );
       })()}
+
+      {/* ── Low Stock Panel ── */}
+      {showLowStock && (
+        <div className="mb-6 border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/20 rounded-md overflow-hidden" data-testid="panel-low-stock">
+          <div className="flex items-center gap-3 px-5 py-3 bg-amber-500 text-white">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span className="text-xs font-semibold uppercase tracking-widest">
+              {language === "ar" ? "منتجات المخزون المنخفض" : "Low Stock Products"}
+            </span>
+            <span className="ms-auto text-xs opacity-80 font-mono tabular-nums">
+              {language === "ar" ? `أقل من ${LOW_STOCK_THRESHOLD} قطع` : `Fewer than ${LOW_STOCK_THRESHOLD} units`}
+            </span>
+          </div>
+          <div className="px-5 py-4 space-y-3">
+            <p className="text-xs text-amber-800 dark:text-amber-300">
+              {language === "ar"
+                ? `يوجد ${lowStockProducts.length} منتج بمخزون منخفض. يمكنك تطبيق خصم على هذه المنتجات لتسريع بيعها.`
+                : `${lowStockProducts.length} product(s) with low stock. Apply a discount to sell them faster.`}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => { setShowDiscountDialog(true); setSelectedLowStockIds(new Set()); }}
+                className="bg-amber-500 hover:bg-amber-600 text-white border-0 gap-1.5 h-8 px-4 text-xs rounded shadow-sm"
+                data-testid="button-apply-low-stock-discount"
+              >
+                <Tag className="w-3.5 h-3.5" />
+                {language === "ar" ? "تطبيق خصم على الكل" : "Apply Discount to All"}
+              </Button>
+              {lowStockProducts.some(p => p.discountPrice) && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleRemoveDiscount(lowStockProducts.map(p => p.id))}
+                  className="text-xs h-8 px-4 rounded border-amber-400 text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/20 gap-1.5"
+                  data-testid="button-remove-low-stock-discount"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  {language === "ar" ? "إزالة الخصم" : "Remove Discount"}
+                </Button>
+              )}
+            </div>
+            {lowStockProducts.length > 0 && (
+              <div className="border border-amber-200 dark:border-amber-800 rounded bg-white dark:bg-background overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-amber-200 dark:border-amber-800 bg-amber-100/50 dark:bg-amber-900/20">
+                      <th className="px-3 py-2 text-start font-semibold text-amber-800 dark:text-amber-300 w-6">
+                        <input type="checkbox" className="accent-amber-500"
+                          checked={selectedLowStockIds.size === lowStockProducts.length && lowStockProducts.length > 0}
+                          onChange={e => setSelectedLowStockIds(e.target.checked ? new Set(lowStockProducts.map(p => p.id)) : new Set())}
+                        />
+                      </th>
+                      <th className="px-3 py-2 text-start font-semibold text-amber-800 dark:text-amber-300">{language === "ar" ? "المنتج" : "Product"}</th>
+                      <th className="px-3 py-2 text-start font-semibold text-amber-800 dark:text-amber-300">{language === "ar" ? "المخزون" : "Stock"}</th>
+                      <th className="px-3 py-2 text-start font-semibold text-amber-800 dark:text-amber-300">{language === "ar" ? "السعر" : "Price"}</th>
+                      <th className="px-3 py-2 text-start font-semibold text-amber-800 dark:text-amber-300">{language === "ar" ? "الخصم" : "Discount"}</th>
+                      <th className="px-3 py-2 text-start font-semibold text-amber-800 dark:text-amber-300"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lowStockProducts.map(p => (
+                      <tr key={p.id} className="border-b border-amber-100 dark:border-amber-900/30 hover:bg-amber-50 dark:hover:bg-amber-900/10" data-testid={`row-low-stock-${p.id}`}>
+                        <td className="px-3 py-2">
+                          <input type="checkbox" className="accent-amber-500"
+                            checked={selectedLowStockIds.has(p.id)}
+                            onChange={e => setSelectedLowStockIds(prev => {
+                              const next = new Set(prev);
+                              e.target.checked ? next.add(p.id) : next.delete(p.id);
+                              return next;
+                            })}
+                          />
+                        </td>
+                        <td className="px-3 py-2 font-medium text-foreground">{p.name}</td>
+                        <td className="px-3 py-2">
+                          <span className={`font-bold ${p.stockQuantity === 0 ? "text-red-600" : "text-amber-600"}`}>
+                            {p.stockQuantity}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{p.price}</td>
+                        <td className="px-3 py-2">
+                          {(p as any).discountPrice ? (
+                            <span className="text-green-600 font-semibold">{(p as any).discountPrice}</span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => { setSelectedLowStockIds(new Set([p.id])); setShowDiscountDialog(true); }}
+                            className="text-amber-600 hover:text-amber-800 transition-colors"
+                            title={language === "ar" ? "تطبيق خصم" : "Apply discount"}
+                            data-testid={`button-discount-product-${p.id}`}
+                          >
+                            <Tag className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {selectedLowStockIds.size > 0 && (
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                  {language === "ar" ? `${selectedLowStockIds.size} محدد` : `${selectedLowStockIds.size} selected`}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => setShowDiscountDialog(true)}
+                  className="bg-amber-500 hover:bg-amber-600 text-white border-0 gap-1.5 h-7 px-3 text-xs rounded shadow-sm"
+                  data-testid="button-discount-selected"
+                >
+                  <Tag className="w-3 h-3" />
+                  {language === "ar" ? "خصم على المحدد" : "Discount Selected"}
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Discount Dialog ── */}
+      <Dialog open={showDiscountDialog} onOpenChange={setShowDiscountDialog}>
+        <DialogContent className="max-w-sm" data-testid="dialog-discount">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Tag className="w-4 h-4 text-amber-500" />
+              {language === "ar" ? "تطبيق خصم" : "Apply Discount"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-muted-foreground">
+              {language === "ar"
+                ? `سيتم تطبيق الخصم على ${selectedLowStockIds.size > 0 ? selectedLowStockIds.size : lowStockProducts.length} منتج`
+                : `Will apply to ${selectedLowStockIds.size > 0 ? selectedLowStockIds.size : lowStockProducts.length} product(s)`}
+            </p>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">{language === "ar" ? "نسبة الخصم (%)" : "Discount Percentage (%)"}</label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  max={99}
+                  placeholder={language === "ar" ? "مثال: 20" : "e.g. 20"}
+                  value={discountPercent}
+                  onChange={e => setDiscountPercent(e.target.value)}
+                  className="h-10 rounded-md"
+                  data-testid="input-discount-percent"
+                />
+                <span className="text-sm font-semibold text-muted-foreground">%</span>
+              </div>
+              {discountPercent && !isNaN(parseFloat(discountPercent)) && parseFloat(discountPercent) > 0 && parseFloat(discountPercent) < 100 && (
+                <p className="text-xs text-green-600 dark:text-green-400">
+                  {language === "ar"
+                    ? `خصم ${discountPercent}% على السعر الأصلي`
+                    : `${discountPercent}% off the original price`}
+                </p>
+              )}
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button
+                type="button"
+                onClick={handleApplyDiscount}
+                disabled={discountApplying || !discountPercent}
+                className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-md gap-2"
+                data-testid="button-confirm-discount"
+              >
+                {discountApplying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                {language === "ar" ? "تطبيق" : "Apply"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setShowDiscountDialog(false); setDiscountPercent(""); }}
+                className="rounded-md"
+                data-testid="button-cancel-discount"
+              >
+                {language === "ar" ? "إلغاء" : "Cancel"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {selectedIds.size > 0 && (
         <div

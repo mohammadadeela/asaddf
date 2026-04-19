@@ -287,11 +287,15 @@ export class DatabaseStorage implements IStorage {
             });
           });
           const totalStock = Object.values(mergedInv).reduce((s, q) => s + (q as number), 0);
-          await tx.update(products).set({
-            colorVariants,
-            sizeInventory: mergedInv,
-            stockQuantity: totalStock,
-          }).where(eq(products.id, item.productId));
+          if (totalStock === 0) {
+            await tx.delete(products).where(eq(products.id, item.productId));
+          } else {
+            await tx.update(products).set({
+              colorVariants,
+              sizeInventory: mergedInv,
+              stockQuantity: totalStock,
+            }).where(eq(products.id, item.productId));
+          }
         } else {
           const sizeInv = { ...((product.size_inventory as Record<string, number>) || {}) };
           if (itemSize && sizeInv[itemSize] !== undefined) {
@@ -301,13 +305,22 @@ export class DatabaseStorage implements IStorage {
             }
             sizeInv[itemSize] = avail - item.quantity;
             const totalStock = Object.values(sizeInv).reduce((s, q) => s + (q as number), 0);
-            await tx.update(products).set({ sizeInventory: sizeInv, stockQuantity: totalStock }).where(eq(products.id, item.productId));
+            if (totalStock === 0) {
+              await tx.delete(products).where(eq(products.id, item.productId));
+            } else {
+              await tx.update(products).set({ sizeInventory: sizeInv, stockQuantity: totalStock }).where(eq(products.id, item.productId));
+            }
           } else {
             const avail = (product.stock_quantity as number) ?? 0;
             if (avail < item.quantity) {
               throw new Error(`STOCK_ERROR:${product.name} — only ${avail} left`);
             }
-            await tx.update(products).set({ stockQuantity: avail - item.quantity }).where(eq(products.id, item.productId));
+            const newStock = avail - item.quantity;
+            if (newStock === 0) {
+              await tx.delete(products).where(eq(products.id, item.productId));
+            } else {
+              await tx.update(products).set({ stockQuantity: newStock }).where(eq(products.id, item.productId));
+            }
           }
         }
       }
@@ -559,9 +572,13 @@ export class DatabaseStorage implements IStorage {
           });
           const totalStock = colorVariants.reduce((sum: number, cv: any) =>
             sum + Object.values(cv.sizeInventory || {}).reduce((s: number, q: any) => s + (q as number), 0), 0);
-          await tx.update(products)
-            .set({ colorVariants, sizeInventory: mergedSizeInv, stockQuantity: totalStock })
-            .where(eq(products.id, item.productId));
+          if (totalStock === 0) {
+            await tx.delete(products).where(eq(products.id, item.productId));
+          } else {
+            await tx.update(products)
+              .set({ colorVariants, sizeInventory: mergedSizeInv, stockQuantity: totalStock })
+              .where(eq(products.id, item.productId));
+          }
         } else {
           const sizeInv = (product.size_inventory as Record<string, number>) || {};
           if (item.size) {
@@ -571,17 +588,26 @@ export class DatabaseStorage implements IStorage {
             }
             sizeInv[item.size] = avail - item.quantity;
             const newStock = Object.values(sizeInv).reduce((s: number, q: any) => s + (q as number), 0) as number;
-            await tx.update(products)
-              .set({ sizeInventory: sizeInv, stockQuantity: newStock })
-              .where(eq(products.id, item.productId));
+            if (newStock === 0) {
+              await tx.delete(products).where(eq(products.id, item.productId));
+            } else {
+              await tx.update(products)
+                .set({ sizeInventory: sizeInv, stockQuantity: newStock })
+                .where(eq(products.id, item.productId));
+            }
           } else {
             const avail = product.stock_quantity as number ?? 0;
             if (avail < item.quantity) {
               throw new Error(`STOCK_ERROR:${product.name} — only ${avail} left`);
             }
-            await tx.update(products)
-              .set({ stockQuantity: avail - item.quantity })
-              .where(eq(products.id, item.productId));
+            const newStock = avail - item.quantity;
+            if (newStock === 0) {
+              await tx.delete(products).where(eq(products.id, item.productId));
+            } else {
+              await tx.update(products)
+                .set({ stockQuantity: newStock })
+                .where(eq(products.id, item.productId));
+            }
           }
         }
       }
