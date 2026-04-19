@@ -1,15 +1,20 @@
 import { v2 as cloudinary } from "cloudinary";
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+function applyConfig() {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+  });
+}
+
+applyConfig();
 
 export async function uploadToCloudinary(
   buffer: Buffer,
   originalName: string
 ): Promise<string> {
+  applyConfig();
   return new Promise((resolve, reject) => {
     const upload = cloudinary.uploader.upload_stream(
       {
@@ -34,6 +39,7 @@ export async function uploadVideoToCloudinary(
   buffer: Buffer,
   originalName: string
 ): Promise<string> {
+  applyConfig();
   return new Promise((resolve, reject) => {
     const upload = cloudinary.uploader.upload_stream(
       {
