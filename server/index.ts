@@ -153,7 +153,7 @@ app.use((req, res, next) => {
 
   // Bind to the PORT env var (set automatically by Render and most platforms).
   // Falls back to 3000 locally. Binds to 0.0.0.0 so it's reachable from outside the container.
-  const port = parseInt(process.env.PORT || "3000", 10);
+  const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(port, "0.0.0.0", () => {
     console.log(`[server] listening on port ${port} (${process.env.NODE_ENV || "development"})`);
     log(`serving on port ${port}`);
